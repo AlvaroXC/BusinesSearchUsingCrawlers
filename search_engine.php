@@ -81,8 +81,8 @@ function execute_search(array $tokens, $conn) {
 
     $sql = "SELECT 
                 doc_id, 
-                filename, 
-                filepath, 
+                source_url, 
+                parent_url, 
                 snippet,
                 MATCH(full_content) AGAINST(? IN BOOLEAN MODE) AS score
             FROM documents

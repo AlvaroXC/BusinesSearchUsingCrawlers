@@ -1,22 +1,23 @@
 # BusinesSearch
 
-## Motor de Búsqueda de Documentos con PHP y MySQL (Versión FULLTEXT)
+## Motor de Búsqueda de Sitios con PHP y MySQL (Versión FULLTEXT)
 
-Este proyecto implementa una aplicación web que funciona como un motor de búsqueda de documentos de texto plano. La aplicación permite a los usuarios subir archivos de texto (`.txt`) y luego realizar búsquedas complejas sobre el contenido de todos los documentos subidos. Los resultados se presentan ordenados por relevancia, mostrando primero los documentos más importantes para la consulta del usuario.
+Este proyecto implementa una aplicación web que funciona como un motor de búsqueda para páginas HTML públicas. El usuario define una lista de URLs que serán rastreadas (nivel 0) junto con las páginas enlazadas directamente desde ellas (nivel 1). Cada documento válido se limpia, se tokeniza y se almacena en una tabla FULLTEXT para realizar búsquedas booleanas avanzadas.
 
-Esta versión ha sido **refactorizada para utilizar las capacidades nativas de MySQL FULLTEXT**, delegando la indexación y el cálculo de relevancia a la base de datos para obtener un rendimiento y una simplicidad significativamente mayores.
+Esta versión ha sido **refactorizada para utilizar las capacidades nativas de MySQL FULLTEXT** y para integrar un crawler que automatiza la recolección de contenido web, evitando depender de archivos subidos manualmente.
 
 ## Funcionamiento
 
 El sistema se divide en dos procesos principales: **Indexación** y **Búsqueda**, ambos optimizados con `MySQL FULLTEXT`.
 
-### 1. Indexación
+### 1. Indexación con crawler
 
-Cuando un usuario sube uno o varios archivos de texto:
+Cuando un usuario necesita poblar o refrescar el índice:
 
-1.  **Recepción y Almacenamiento**: El `upload_handler.php` recibe los archivos y los guarda en una carpeta `uploads/` en el servidor.
-2.  **Almacenamiento para Indexación**: El `indexer.php` lee el contenido completo de cada archivo y lo guarda en una columna `full_content` de la tabla `documents`.
-3.  **Indexación Automática**: MySQL se encarga automáticamente de indexar el contenido de la columna `full_content` utilizando su motor `FULLTEXT`. No es necesario procesar el texto ni mantener un índice invertido manualmente en PHP.
+1.  **Gestión de URLs**: En `index.php` se encuentra un formulario con una `textarea` para escribir la lista de URLs raíz (una por línea). La lista se guarda automáticamente en `data/url_seeds.txt` y se muestra cada vez que se visita la página.
+2.  **Ejecución del crawler**: Desde el mismo formulario se puede lanzar el crawler (`crawler.php`). Este módulo lee las URLs raíz, visita cada una (nivel 0) y extrae los enlaces directos para visitar también el nivel 1.
+3.  **Filtrado y limpieza**: Solo se conservan respuestas `text/html`. Antes de almacenarlas se remueven etiquetas `<script>`, se eliminan signos de puntuación, se convierte a minúsculas, se filtran *stopwords* según el idioma detectado (es/en), se singularizan los tokens y se generan cadenas listas para indexar.
+4.  **Indexación condicional**: El crawler calcula `sha256` del HTML y usa cabeceras `ETag`/`Last-Modified` para saltar páginas sin cambios. El resultado final se guarda mediante `upsert_document()` (`indexer.php`) en la tabla `documents`, que cuenta con un índice FULLTEXT sobre la columna `full_content`.
 
 ### 2. Búsqueda
 
@@ -30,18 +31,18 @@ Cuando un usuario realiza una consulta:
 
 ### 1. Configuración Inicial
 
-1.  **Servidor**: Asegurarse de tener un entorno de servidor web como XAMPP con Apache y MySQL en funcionamiento.
+1.  **Servidor**: Asegurarse de tener un entorno tipo XAMPP con Apache y MySQL.
 2.  **Base de Datos**:
-    *   Importar el script `search_engine_db.sql` en un gestor de MySQL (como phpMyAdmin). Este script creará automáticamente la base de datos `search_engine_db_bs` y la tabla `documents`.
-3.  **Conexión**: Verificar que las credenciales en `db_connection.php` sean correctas para el entorno de trabajo.
-4.  **Directorio `uploads`**: El script creará automáticamente la carpeta `uploads/` la primera vez que subas un archivo. Asegurarse de que el servidor tenga permisos de escritura en el directorio del proyecto.
+    *   Importar el script `search_engine_db.sql`. Creará la base `search_engine_db_bs` y la tabla `documents` con columnas para `source_url`, `parent_url`, `content_hash`, `etag`, etc.
+3.  **Conexión**: Verificar que las credenciales en `db_connection.php` correspondan al entorno local.
+4.  **Directorio `data/`**: El formulario de URLs usa `data/url_seeds.txt`. Garantiza permisos de escritura sobre esa carpeta para que el listado se mantenga persistente.
 
 ### 2. Probar la Indexación
 
-1.  **Crear archivos de prueba**: Crear varios archivos `.txt` con contenido variado.
-2.  **Subir los archivos**: Usar el formulario "Indexar Nuevos Documentos" en la página principal para subirlos.
-3.  **Verificar la Base de Datos**: Con una herramienta como phpMyAdmin, revisar que la tabla `documents` se haya poblado con el contenido de los archivos subidos.
-4.  **Probar la re-indexación**: Modificar uno de los archivos y vuelve a subirlo. El sistema lo reemplazará y MySQL lo re-indexará automáticamente.
+1.  **Configurar URLs**: Ingresa a `index.php`, pega varias URLs (una por línea) y presiona “Guardar lista”.
+2.  **Lanzar el crawler**: Presiona “Guardar y ejecutar crawler”. Al finalizar verás cuántas páginas se procesaron, indizaron o se omitieron por no ser HTML/por no cambiar.
+3.  **Verificar la base**: Usa phpMyAdmin para revisar que `documents` contiene el contenido tokenizado en `full_content` y la metadata (`content_hash`, `last_crawled_at`, etc.).
+4.  **Re-indexar**: Vuelve a ejecutar el crawler cuando quieras. Solo las páginas con cambios se vuelven a almacenar; el resto se marca como revisada mediante `touch_document()`.
 
 ### 3. Probar la Búsqueda y Relevancia
 
@@ -56,13 +57,13 @@ Esta aplicación ha evolucionado desde una implementación manual de un índice 
 
 ### Versión Anterior (Manual)
 
-*   **Indexación**: PHP leía los archivos, los normalizaba, tokenizaba y calculaba frecuencias y posiciones. Se mantenía un índice invertido en dos tablas (`terms` y `postings`).
-*   **Búsqueda**: PHP utilizaba el algoritmo Shunting-yard para evaluar la lógica booleana, realizaba múltiples consultas para obtener IDs de documentos y finalmente calculaba la relevancia con TF-IDF y Similitud del Coseno en código PHP.
+*   **Indexación**: PHP leía archivos `.txt` subidos por el usuario, los normalizaba y calculaba frecuencias para mantener un índice invertido en `terms` y `postings`.
+*   **Búsqueda**: Se aplicaba el algoritmo Shunting-yard para evaluar expresiones booleanas y se calculaba la relevancia con TF-IDF + Similitud del Coseno directamente en PHP.
 
-### Versión Actual (MySQL FULLTEXT)
+### Versión Actual (Crawler + MySQL FULLTEXT)
 
-*   **Indexación**: PHP simplemente guarda el contenido completo del archivo en la base de datos. MySQL se encarga de todo el proceso de indexación.
-*   **Búsqueda**: PHP traduce la consulta a la sintaxis de `MATCH...AGAINST` y ejecuta una única consulta. MySQL se encarga de la búsqueda, el ranking y la puntuación.
+*   **Indexación**: El crawler obtiene HTML real, lo filtra, detecta idioma, singulariza tokens y almacena el resultado en `documents.full_content`. El módulo `indexer.php` guarda metadata (hash, `etag`, `last_modified_header`, `parent_url`, `last_crawled_at`) para evitar reprocesar páginas sin cambios.
+*   **Búsqueda**: `parser.php` convierte la consulta a tokens y `search_engine.php` construye la sentencia `MATCH...AGAINST`, delegando ranking y puntuación enteramente a MySQL.
 
 ### Ventajas de la Versión Actual (MySQL FULLTEXT)
 

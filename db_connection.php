@@ -11,11 +11,12 @@
 
 define('DB_SERVER', 'localhost');
 define('DB_USERNAME', 'root');
-define('DB_PASSWORD', 'root');
+define('DB_PASSWORD', 'mysqlroot');
+define('PORT', 3306);
 define('DB_NAME', 'search_engine_db_bs');
 
 /** @var mysqli $conn La instancia de conexión a la base de datos. */
-$conn = new mysqli(DB_SERVER, DB_USERNAME, DB_PASSWORD, DB_NAME);
+$conn = new mysqli(DB_SERVER, DB_USERNAME, DB_PASSWORD, DB_NAME, PORT);
 
 if ($conn->connect_error) {
     die("Error de conexión: " . $conn->connect_error);
